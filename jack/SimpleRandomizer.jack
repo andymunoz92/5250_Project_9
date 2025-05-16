@@ -1,0 +1,19 @@
+// This class is for generating random numbers using a basic method
+class SimpleRandomizer {
+    static int randomSeed;
+
+    // Sets the starting point for the random sequence
+    function void setup(int startingSeed) {
+        let randomSeed = startingSeed;
+        return;
+    }
+
+    // Gives back the next random number
+    function int getNext() {
+        // Uses a basic formula to make the next number look random
+        let randomSeed = (randomSeed * 25173) + 13849;
+
+        // Since Jack ints are already limited to 0-32767, no need for manual modulo
+        return randomSeed;
+    }
+}
