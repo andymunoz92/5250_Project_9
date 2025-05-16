@@ -1,0 +1,677 @@
+// PlaySession controls the game loop, drawing, and block management.
+
+class PlaySession {
+    field int currentScore;
+
+    field int screenW;
+    field int screenH;
+    field int fieldW;
+    field int fieldH;
+    field int topEdge;
+    field int leftEdge;
+    field int bottomEdge;
+    field int rightEdge;
+
+    field int blockKind; 
+    field int blockRotation; 
+    field int blockPosX;
+    field int blockPosY;
+    field int blockBoxSize;
+
+    field int part0X;
+    field int part0Y;
+    field int part1X;
+    field int part1Y;
+    field int part2X;
+    field int part2Y;
+    field int part3X;
+    field int part3Y;
+
+    //candidate piece location
+    field int blockPosXTmp;
+    field int blockPosYTmp;
+    field int part0XTmp;
+    field int part0YTmp;
+    field int part1XTmp;
+    field int part1YTmp;
+    field int part2XTmp;
+    field int part2YTmp;
+    field int part3XTmp;
+    field int part3YTmp;
+
+    field Array gameGrid;
+    field int gridW;
+    field int gridH;
+
+    field int frameDelay;
+
+    constructor PlaySession new() {
+        var int i;
+        var int j;
+
+        // Setup
+
+        let screenW = 512;
+        let screenH = 256;
+
+        // block size is 10 (9x9 with shared 1px border)
+        //game area is 10 blocks wide, 24 blocks tall
+        let fieldW = 100; 
+        let fieldH = 240; 
+
+        let leftEdge = (screenW - fieldW) / 2;
+        let topEdge = (screenH - fieldH) / 2;
+        let rightEdge = leftEdge + fieldW;
+        let bottomEdge = topEdge + fieldH;
+
+        // initialize the random number generator
+        do SimpleRandomizer.setup(42);
+
+
+        // initialize the game gameGrid
+        let gameGrid = Array.new(10 * 24);
+        let gridW = 10;
+        let gridH = 24;
+        let i = 0;
+        while (i < gridH) {
+            let j = 0;
+            while (j < gridW) {
+                let gameGrid[i*gridW + j] = false;
+                let j = j + 1;
+            }
+            let i = i + 1;
+        }
+
+        // initialize the timer
+        let frameDelay = 8000; // iterations per frame
+
+        do draw();
+        
+        return this;
+    }
+
+    method void cleanup() {
+        // Cleanup
+        do Memory.deAlloc(this);
+        return;
+    }
+
+
+    method void startGame() {
+        var boolean game_over;
+        let game_over = spawn_piece();
+        while (~game_over) {
+            do drop_piece();
+            do clear_rows();
+            let game_over = spawn_piece();
+        }
+
+        //print game over message in center of the screen
+        do Output.moveCursor(10, 10);
+        do Output.printString("GAME OVER!");
+
+        return;
+    }
+
+
+
+    method void run() {
+        return;
+    }
+
+    method int mod(int x, int y) {
+        // return the remainder of x/y
+        var int val;
+        let val = x - ((x/y)*y);
+        if (val < 0) { let val = val + y; }
+        return val;
+    }
+
+    method boolean spawn_piece() {
+        // spawn a new piece
+        let blockKind = mod(SimpleRandomizer.getNext(), 7);
+        // let blockKind = 0; //DEBUG set to I piece
+
+        // set up the bounding box for this piece
+        if (blockKind = 0) { // long piece has 4x4 bbox
+            let blockPosXTmp = 3;
+            let blockPosYTmp = 0;
+            let blockBoxSize = 4;
+        } else { // all other pieces have 3x3 bbox
+            let blockPosXTmp = 4;
+            let blockPosYTmp = 0;
+            let blockBoxSize = 3;
+        }
+
+        // set up the blockRotation for this piece
+        let blockRotation = 0;
+
+        if (blockKind = 0) { do set_I(); }
+        if (blockKind = 1) { do set_J(); }
+        if (blockKind = 2) { do set_L(); }
+        if (blockKind = 3) { do set_O(); }
+        if (blockKind = 4) { do set_S(); }
+        if (blockKind = 5) { do set_T(); }
+        if (blockKind = 6) { do set_Z(); }
+
+        // check for game over if piece failed to spawn
+        if (~can_move_to_candidate()) { return true; }
+
+        // draw the new piece
+        do move_to_candidate();
+        do draw_tetrimino();
+
+        return false;
+    }
+
+
+    method bool can_move_to_candidate() {
+        //check if the piece at the candidate location is valid
+        if (((blockPosYTmp + part0YTmp) < 0) | 
+            ((blockPosYTmp + part0YTmp) > (gridH - 1)) |
+            ((blockPosXTmp + part0XTmp) < 0) | 
+            ((blockPosXTmp + part0XTmp) > (gridW - 1)) |
+            board_filled(blockPosYTmp + part0YTmp, blockPosXTmp + part0XTmp)
+        ) { return false; }
+        if (((blockPosYTmp + part1YTmp) < 0) | 
+            ((blockPosYTmp + part1YTmp) > (gridH - 1)) |
+            ((blockPosXTmp + part1XTmp) < 0) | 
+            ((blockPosXTmp + part1XTmp) > (gridW - 1)) |
+            board_filled(blockPosYTmp + part1YTmp, blockPosXTmp + part1XTmp)
+        ) { return false; }
+        if (((blockPosYTmp + part2YTmp) < 0) | 
+            ((blockPosYTmp + part2YTmp) > (gridH - 1)) |
+            ((blockPosXTmp + part2XTmp) < 0) | 
+            ((blockPosXTmp + part2XTmp) > (gridW - 1)) |
+            board_filled(blockPosYTmp + part2YTmp, blockPosXTmp + part2XTmp)
+        ) { return false; }
+        if (((blockPosYTmp + part3YTmp) < 0) | 
+            ((blockPosYTmp + part3YTmp) > (gridH - 1)) |
+            ((blockPosXTmp + part3XTmp) < 0) | 
+            ((blockPosXTmp + part3XTmp) > (gridW - 1)) |
+            board_filled(blockPosYTmp + part3YTmp, blockPosXTmp + part3XTmp)
+        ) { return false; }
+        return true;
+    }
+
+    method void reset_move_to_candidate() {
+        //move the piece back to the original location
+        let blockPosXTmp = blockPosX;
+        let blockPosYTmp = blockPosY;
+        let part0XTmp = part0X;
+        let part0YTmp = part0Y;
+        let part1XTmp = part1X;
+        let part1YTmp = part1Y;
+        let part2XTmp = part2X;
+        let part2YTmp = part2Y;
+        let part3XTmp = part3X;
+        let part3YTmp = part3Y;
+        return;
+    }
+    method void move_to_candidate() {
+        //move the piece to the candidate location
+        let blockPosX = blockPosXTmp;
+        let blockPosY = blockPosYTmp;
+        let part0X = part0XTmp;
+        let part0Y = part0YTmp;
+        let part1X = part1XTmp;
+        let part1Y = part1YTmp;
+        let part2X = part2XTmp;
+        let part2Y = part2YTmp;
+        let part3X = part3XTmp;
+        let part3Y = part3YTmp;
+        return;
+    }
+
+    method void drop_piece() {
+        // drop the current piece until it hits the bottom
+
+        var char key;
+        var char prev_key;
+        var boolean pressed_key;
+        var int time_since_last_move;
+
+        let time_since_last_move = 0;
+        
+        while (true) {
+            let pressed_key = false;
+
+            //draw the game
+            // do draw_tetrimino();
+
+            let key = Keyboard.keyPressed();
+            if (~(key = prev_key) & ~(key = 0)) {
+                let pressed_key = true;
+                let time_since_last_move = 0;
+
+                //clear the current piece
+                // do Screen.setColor(false);
+                // do draw_tetrimino();
+                // do Screen.setColor(true);
+
+                // DEBUG controls
+                // if (key = 65)  { do rotate_ccw(); }  // A
+                // if (key = 68)  { do rotate_cw(); }   // D
+                // if (key = 133) { do move_down(); }  // down arrow
+                // if (key = 131) { do move_up(); }    // up arrow
+                
+                // actual controls
+                if (key = 132) { do move_right(); } // right arrow
+                if (key = 130) { do move_left(); }  // left arrow
+                if (key = 133) { do rotate_cw(); }  // down arrow
+                if (key = 131) { do rotate_ccw(); } // up arrow
+
+                // //DEBUG change to a different piece
+                // if ((key = 87) | (key = 83)) {
+                //     if (key = 87) { let blockKind = mod(blockKind + 1, 7); }
+                //     if (key = 83) { let blockKind = mod(blockKind - 1, 7); }
+                //     if (blockKind = 0) { let blockBoxSize = 4; do set_I(); if (can_move_to_candidate()) { do move_to_candidate(); } }
+                //     if (blockKind = 1) { let blockBoxSize = 3; do set_J(); if (can_move_to_candidate()) { do move_to_candidate(); } }
+                //     if (blockKind = 2) { let blockBoxSize = 3; do set_L(); if (can_move_to_candidate()) { do move_to_candidate(); } }
+                //     if (blockKind = 3) { let blockBoxSize = 3; do set_O(); if (can_move_to_candidate()) { do move_to_candidate(); } }
+                //     if (blockKind = 4) { let blockBoxSize = 3; do set_S(); if (can_move_to_candidate()) { do move_to_candidate(); } }
+                //     if (blockKind = 5) { let blockBoxSize = 3; do set_T(); if (can_move_to_candidate()) { do move_to_candidate(); } }
+                //     if (blockKind = 6) { let blockBoxSize = 3; do set_Z(); if (can_move_to_candidate()) { do move_to_candidate(); } }
+                // }
+
+
+            }
+
+            if (~pressed_key & (time_since_last_move > frameDelay)) {
+                let time_since_last_move = 0;
+                if (~move_down()) {
+                    //lock the piece in place
+                    do set_board(blockPosY + part0Y, blockPosX + part0X, true);
+                    do set_board(blockPosY + part1Y, blockPosX + part1X, true);
+                    do set_board(blockPosY + part2Y, blockPosX + part2X, true);
+                    do set_board(blockPosY + part3Y, blockPosX + part3X, true);
+
+                    let currentScore = currentScore + 10;
+                    do draw_score();
+
+                    return;
+                }
+            }
+
+
+            // draw the current piece
+            // do draw_tetrimino();
+
+            // update prev key, and timer
+            let prev_key = key;
+            let time_since_last_move = time_since_last_move + 1;
+
+        }
+
+        // unreachable
+        return;
+    }
+
+    method void clear_rows() {
+        var int i;
+        var int j;
+        var boolean row_filled;
+        var int rows_cleared;
+
+        let rows_cleared = 0;
+        let i = gridH - 1;
+        while ((i > 0) | (i = 0)) {
+            let j = 0;
+            let row_filled = true;
+            while (j < gridW) {
+                if (~board_filled(i, j)) { 
+                    let row_filled = false;
+                }
+                let j = j + 1;
+            }
+            if (row_filled) {
+                do clear_row(i);
+                let rows_cleared = rows_cleared + 1;
+            } else {
+                let i = i - 1;
+            }
+        }
+
+        // redraw all blocks
+        let i = 0;
+        while (i < gridH) {
+            let j = 0;
+            while (j < gridW) {
+                if (board_filled(i, j)) {
+                    do Screen.setColor(true);
+                    do draw_block(i, j);
+                } else {
+                    do Screen.setColor(false);
+                    do draw_block(i, j);
+                }
+                let j = j + 1;
+            }
+            let i = i + 1;
+        }
+        do Screen.setColor(true);
+
+        // update the currentScore
+        let currentScore = currentScore + (rows_cleared * rows_cleared * 100);
+        if (rows_cleared = 4) { let currentScore = currentScore + 3400; } //Tetris bonus
+        do draw_score();
+
+        return;
+    }
+
+    method void clear_row(int idx) {
+        var int i;
+        var int j;
+
+        // shift all rows above idx down one
+        let i = idx;
+        while (i > 0) {
+            let j = 0;
+            while (j < gridW) {
+                let gameGrid[i*gridW + j] = gameGrid[(i-1)*gridW + j];
+                let j = j + 1;
+            }
+            let i = i - 1;
+        }
+        // clear last row separately
+        let j = 0;
+        while (j < gridW) {
+            let gameGrid[j] = false;
+            let j = j + 1;
+        }
+
+        return;
+    }
+
+
+
+    method boolean board_filled(int y, int x) {
+        return gameGrid[y*gridW + x];
+    }
+
+    method void set_board(int y, int x, boolean state) {
+        let gameGrid[y*gridW + x] = state;
+        return;
+    }
+
+    method boolean rotate_ccw() {
+        // rotate the current piece counter-clockwise
+        //TODO fancy super blockRotation system checks
+
+        // square pieces don't rotate
+        if (blockKind = 3) { return true; }
+
+        // ccw blockRotation is: x' = y, y' = blockBoxSize-x-1
+        let part0XTmp = part0Y;
+        let part0YTmp = blockBoxSize-part0X-1;
+
+        let part1XTmp = part1Y;
+        let part1YTmp = blockBoxSize-part1X-1;
+
+        let part2XTmp = part2Y;
+        let part2YTmp = blockBoxSize-part2X-1;
+
+        let part3XTmp = part3Y;
+        let part3YTmp = blockBoxSize-part3X-1;
+
+        if (~can_move_to_candidate()) { 
+            do reset_move_to_candidate();
+            return false;
+        } 
+
+        do undraw_tetrimino();
+        do move_to_candidate();
+        do draw_tetrimino();
+        return true;
+    }
+
+    method boolean rotate_cw() {
+        // rotate the current piece clockwise
+
+        // square pieces don't rotate
+        if (blockKind = 3) { return true; }
+
+        // cw blockRotation is: x' = blockBoxSize-y-1, y' = x
+        let part0XTmp = blockBoxSize-part0Y-1;
+        let part0YTmp = part0X;
+
+        let part1XTmp = blockBoxSize-part1Y-1;
+        let part1YTmp = part1X;
+
+        let part2XTmp = blockBoxSize-part2Y-1;
+        let part2YTmp = part2X;
+
+        let part3XTmp = blockBoxSize-part3Y-1;
+        let part3YTmp = part3X;
+
+        if (~can_move_to_candidate()) { 
+            do reset_move_to_candidate();
+            return false;
+        }
+
+        do undraw_tetrimino();
+        do move_to_candidate();
+        do draw_tetrimino();
+        return true;
+    }
+
+    method boolean move_left() {
+        // move the current piece left
+
+        let blockPosXTmp = blockPosX - 1;
+        if (~can_move_to_candidate()) {
+            do reset_move_to_candidate();
+            return false;
+        }
+        
+        do undraw_tetrimino();
+        do move_to_candidate();
+        do draw_tetrimino();
+        return true;
+    }
+
+    method boolean move_right() {
+        // move the current piece right
+
+        let blockPosXTmp = blockPosX + 1;
+        if (~can_move_to_candidate()) {
+            do reset_move_to_candidate();
+            return false;
+        }
+        
+        do undraw_tetrimino();
+        do move_to_candidate();
+        do draw_tetrimino();
+        return true;
+    }
+
+    method boolean move_up() {
+        // move the current piece up
+
+        let blockPosYTmp = blockPosY - 1;
+        if (~can_move_to_candidate()) {
+            do reset_move_to_candidate();
+            return false;
+        }
+        
+        do undraw_tetrimino();
+        do move_to_candidate();
+        do draw_tetrimino();
+        return true;
+    }
+
+    method boolean move_down() {
+        // move the current piece down
+
+        let blockPosYTmp = blockPosY + 1;
+        if (~can_move_to_candidate()) {
+            do reset_move_to_candidate();
+            return false;
+        }
+
+        do undraw_tetrimino();
+        do move_to_candidate();
+        do draw_tetrimino();
+        return true;
+    }
+
+    method void set_I() {
+        // set the current block to an I piece (with default blockRotation)
+        let part0XTmp = 0;
+        let part1XTmp = 1;
+        let part2XTmp = 2;
+        let part3XTmp = 3;
+        let part0YTmp = 1;
+        let part1YTmp = 1;
+        let part2YTmp = 1;
+        let part3YTmp = 1;
+
+        return;
+    }
+
+    method void set_J() {
+        // set the current block to a J piece (with default blockRotation)
+        let part0XTmp = 0;
+        let part1XTmp = 0;
+        let part2XTmp = 1;
+        let part3XTmp = 2;
+        let part0YTmp = 0;
+        let part1YTmp = 1;
+        let part2YTmp = 1;
+        let part3YTmp = 1;
+
+        return;
+    }
+
+    method void set_L() {
+        // set the current block to an L piece (with default blockRotation)
+        let part0XTmp = 0;
+        let part1XTmp = 1;
+        let part2XTmp = 2;
+        let part3XTmp = 2;
+        let part0YTmp = 1;
+        let part1YTmp = 1;
+        let part2YTmp = 1;
+        let part3YTmp = 0;
+
+        return;
+    }
+
+    method void set_O() {
+        // set the current block to an O piece (with default blockRotation)
+        let part0XTmp = 1;
+        let part1XTmp = 2;
+        let part2XTmp = 1;
+        let part3XTmp = 2;
+        let part0YTmp = 0;
+        let part1YTmp = 0;
+        let part2YTmp = 1;
+        let part3YTmp = 1;
+
+        return;
+    }
+
+    method void set_S() {
+        // set the current block to an S piece (with default blockRotation)
+        let part0XTmp = 0;
+        let part1XTmp = 1;
+        let part2XTmp = 1;
+        let part3XTmp = 2;
+        let part0YTmp = 1;
+        let part1YTmp = 1;
+        let part2YTmp = 0;
+        let part3YTmp = 0;
+
+        return;
+    }
+
+    method void set_T() {
+        // set the current block to a T piece (with default blockRotation)
+        let part0XTmp = 1;
+        let part1XTmp = 0;
+        let part2XTmp = 1;
+        let part3XTmp = 2;
+        let part0YTmp = 0;
+        let part1YTmp = 1;
+        let part2YTmp = 1;
+        let part3YTmp = 1;
+
+        return;
+    }
+
+    method void set_Z() {
+        // set the current block to a Z piece (with default blockRotation)
+        let part0XTmp = 0;
+        let part1XTmp = 1;
+        let part2XTmp = 1;
+        let part3XTmp = 2;
+        let part0YTmp = 0;
+        let part1YTmp = 0;
+        let part2YTmp = 1;
+        let part3YTmp = 1;
+
+        return;
+    }
+
+
+
+
+    method void draw() {
+        do Screen.clearScreen();
+        do Screen.setColor(true);
+
+        //Draw an outline around the startGame area 
+        do draw_outline(leftEdge, topEdge, rightEdge, bottomEdge);
+        
+        do draw_score();
+
+        return;
+    }
+
+    method void draw_outline(int x1, int y1, int x2, int y2) {
+        // draw a 1 pixel border around the specified rectangle
+        do Screen.drawRectangle(x1-1, y1-1, x2+1, y2+1);
+        do Screen.setColor(false);
+        do Screen.drawRectangle(x1, y1, x2, y2);
+        do Screen.setColor(true);
+        return;
+    }
+
+    method void draw_score() {
+        do Output.moveCursor(1, 1);
+        do Output.printString("Score: ");
+        do Output.printInt(currentScore);
+        return;
+    }
+
+    method void draw_block(int y, int x) {
+        // draw a tetrino block at the specified game coordinates
+        // game coordinates are from the top left corner of the startGame area
+        // block size is 10 (9x9 with shared 1px border)
+        var int x1, y1, x2, y2;
+        let x1 = leftEdge + 1 + (x*10);
+        let y1 = topEdge + 1 + (y*10);
+        let x2 = x1 + 8;
+        let y2 = y1 + 8;
+
+        do Screen.drawRectangle(x1, y1, x2, y2);
+        return;
+    }
+
+    method void draw_tetrimino() {
+        // draw the current piece
+
+        do draw_block(blockPosY + part0Y, blockPosX + part0X);
+        do draw_block(blockPosY + part1Y, blockPosX + part1X);
+        do draw_block(blockPosY + part2Y, blockPosX + part2X);
+        do draw_block(blockPosY + part3Y, blockPosX + part3X);
+
+        return;
+    }
+
+    method void undraw_tetrimino() {
+        do Screen.setColor(false);
+        do draw_tetrimino();
+        do Screen.setColor(true);
+        return;
+    }
+}
