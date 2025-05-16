@@ -1,0 +1,14 @@
+// Main entry point for the program
+class Main {
+
+    // This is where everything begins
+    function void main() {
+        var PlaySession session; // make a new game session
+
+        let session = PlaySession.new(); // create the game session
+        do session.startGame(); // start playing the game
+        do session.cleanup(); // clean up after the game ends
+
+        return;
+    }
+}
