@@ -1,0 +1,14 @@
+function SimpleRandomizer.setup 0
+push argument 0
+pop static 0
+push constant 0
+return
+function SimpleRandomizer.getNext 0
+push static 0
+push constant 25173
+call Math.multiply 2
+push constant 13849
+add
+pop static 0
+push static 0
+return
