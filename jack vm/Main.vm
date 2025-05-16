@@ -1,0 +1,11 @@
+function Main.main 1
+call PlaySession.new 0
+pop local 0
+push local 0
+call PlaySession.startGame 1
+pop temp 0
+push local 0
+call PlaySession.cleanup 1
+pop temp 0
+push constant 0
+return
